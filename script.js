@@ -1,15 +1,21 @@
+// हर instance के लिए unique ID बनाओ (पेज लोड होने पर एक बार)
+const INSTANCE_ID = 'inst_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+// अब keys को instance-specific बनाओ
+const getKey = (base) => `${base}_${INSTANCE_ID}`;
+
+const STATE_KEY   = getKey('hp_isOn');
+const USED_KEY    = getKey('hp_used_numbers');
+const ACTIVE_KEY  = getKey('hp_active_numbers');
+
 const API_KEY  = "9f67f5ed7e8eef95214e93e2da6b3465";
 const BASE_URL = "https://api.grizzlysms.com/stubs/handler_api.php";
 const SERVICE  = "swr";
 const COUNTRY  = "22";
 const MAX_PRICE = "80";
 
-const STATE_KEY   = 'hp_isOn';
-const USED_KEY    = 'hp_used_numbers';
-const ACTIVE_KEY  = 'hp_active_numbers';
-
 let isOn = localStorage.getItem(STATE_KEY) === 'true';
-let usedNumbers = JSON.parse(localStorage.getItem(USED_KEY)  || '[]');
+let usedNumbers = JSON.parse(localStorage.getItem(USED_KEY) || '[]');
 let activeNumbers = JSON.parse(localStorage.getItem(ACTIVE_KEY) || '[]');
 
 const toggleBtn  = document.getElementById('toggleBtn');
@@ -50,7 +56,7 @@ function cleanStorage() {
   activeNumbers = activeNumbers.filter(item =>
     item.phone && item.phone.length === 12 &&
     item.phone.startsWith("91") &&
-    (now - item.startTime) < 300000
+    (now - item.startTime) < 300000  // 5 min
   );
   saveActive();
 }
@@ -71,9 +77,7 @@ function renderSaved() {
 
 function flashBoxRed(box) {
   box.classList.add('copied-flash');
-  setTimeout(() => {
-    box.classList.remove('copied-flash');
-  }, 1500);
+  setTimeout(() => box.classList.remove('copied-flash'), 1500);
 }
 
 function createNumberBox(num10, id, startTime, otp = null) {
@@ -81,7 +85,8 @@ function createNumberBox(num10, id, startTime, otp = null) {
   box.className = 'numbox';
   box.dataset.id = id;
 
-  const clickedClass = localStorage.getItem(`copy_${id}`) === 'once' ? 'clicked-once' : '';
+  const clickedKey = `copy_${id}_${INSTANCE_ID}`;
+  const clickedClass = localStorage.getItem(clickedKey) === 'once' ? 'clicked-once' : '';
 
   box.innerHTML = `
     <div class="top-row">
@@ -99,7 +104,6 @@ function createNumberBox(num10, id, startTime, otp = null) {
     <div class="timer">05:00</div>
   `;
 
-  // Copy on clicking number + red flash
   const phoneEl = box.querySelector('.phone10');
   const copyNumBtn = box.querySelector('.copy-number-btn');
 
@@ -109,17 +113,16 @@ function createNumberBox(num10, id, startTime, otp = null) {
 
     if (copyNumBtn.classList.contains('clicked-once')) {
       copyNumBtn.classList.remove('clicked-once');
-      localStorage.removeItem(`copy_${id}`);
+      localStorage.removeItem(clickedKey);
     } else {
       copyNumBtn.classList.add('clicked-once');
-      localStorage.setItem(`copy_${id}`, 'once');
+      localStorage.setItem(clickedKey, 'once');
     }
   };
 
   phoneEl.onclick = copyNumberAction;
   copyNumBtn.onclick = copyNumberAction;
 
-  // Copy OTP
   const copyOtpBtn = box.querySelector('.copy-otp-btn');
   copyOtpBtn.onclick = () => {
     const otpText = box.querySelector('.otp').textContent.trim();
@@ -139,8 +142,9 @@ function startTimer(box, startTime) {
   
   const int = setInterval(() => {
     remaining--;
+    if (remaining < 0) remaining = 0;
     const m = String(Math.floor(remaining/60)).padStart(2,'0');
-    const s = String(remaining%60).padStart(2,'0');
+    const s = String(remaining % 60).padStart(2,'0');
     timer.textContent = `${m}:${s}`;
     
     if (remaining <= 0) {
@@ -175,11 +179,13 @@ function startPolling(box, id) {
           saveActive();
         }
       }
-    } catch {}
+    } catch (err) {
+      // silent fail
+    }
   }, 1800);
 }
 
-let interval;
+let interval = null;
 
 async function fetchNumber() {
   if (!isOn) return;
@@ -211,7 +217,9 @@ async function fetchNumber() {
       startTimer(box, startTime);
       startPolling(box, id);
     }
-  } catch {}
+  } catch (err) {
+    // silent
+  }
 }
 
 function start() {
@@ -219,6 +227,14 @@ function start() {
   interval = setInterval(fetchNumber, 1200);
 }
 
+function stop() {
+  if (interval) {
+    clearInterval(interval);
+    interval = null;
+  }
+}
+
+// Initialization
 updateUI();
 renderSaved();
 if (isOn) start();
