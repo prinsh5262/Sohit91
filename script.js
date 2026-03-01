@@ -1,4 +1,4 @@
-// ------------------ Instance अलग करने के लिए नाम लो ------------------
+// ------------------ Instance अलग करने के लिए नाम ------------------
 let INSTANCE_NAME = localStorage.getItem('hp_instance_name');
 
 if (!INSTANCE_NAME) {
@@ -12,7 +12,7 @@ if (!INSTANCE_NAME) {
   if (!nameInput || nameInput.trim() === "") {
     nameInput = "default_" + Math.random().toString(36).substring(2, 9);
   } else {
-    nameInput = nameInput.trim().replace(/[^a-zA-Z0-9_-]/g, '_'); // safe characters
+    nameInput = nameInput.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
   }
 
   INSTANCE_NAME = nameInput;
@@ -20,7 +20,6 @@ if (!INSTANCE_NAME) {
   alert("इस इंस्टेंस का नाम सेट हो गया: " + INSTANCE_NAME + "\nअब अलग टैब में दूसरा नाम डालकर चलाओ");
 }
 
-// keys को instance-specific बनाओ
 const getKey = (base) => `hp_${base}_${INSTANCE_NAME}`;
 
 const STATE_KEY   = getKey('isOn');
@@ -93,8 +92,12 @@ function renderSaved() {
     .forEach(item => {
       const box = createNumberBox(item.phone.slice(2), item.id, item.startTime, item.otp);
       numbersDiv.appendChild(box);
+
+      // Timer और Polling दोनों refresh के बाद भी सही से चालू रहें
       startTimer(box, item.startTime);
-      if (!item.otp) startPolling(box, item.id);
+      if (!item.otp) {
+        startPolling(box, item.id);
+      }
     });
 }
 
@@ -160,27 +163,38 @@ function createNumberBox(num10, id, startTime, otp = null) {
 }
 
 function startTimer(box, startTime) {
-  let remaining = 300 - Math.floor((Date.now() - startTime) / 1000);
-  if (remaining < 0) remaining = 0;
+  const timerEl = box.querySelector('.timer');
 
-  const timer = box.querySelector('.timer');
-  const int = setInterval(() => {
-    remaining--;
-    if (remaining < 0) remaining = 0;
-    const m = String(Math.floor(remaining / 60)).padStart(2, '0');
-    const s = String(remaining % 60).padStart(2, '0');
-    timer.textContent = `${m}:${s}`;
+  function updateTimer() {
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    let remaining = 300 - elapsed;
 
     if (remaining <= 0) {
-      clearInterval(int);
       box.remove();
       activeNumbers = activeNumbers.filter(i => i.id !== box.dataset.id);
       saveActive();
+      return;
     }
-  }, 980);
 
-  // cleanup on page unload (optional but good)
-  window.addEventListener('beforeunload', () => clearInterval(int));
+    const m = String(Math.floor(remaining / 60)).padStart(2, '0');
+    const s = String(remaining % 60).padStart(2, '0');
+    timerEl.textContent = `${m}:${s}`;
+  }
+
+  updateTimer(); // तुरंत अपडेट
+  const timerInterval = setInterval(updateTimer, 980);
+
+  // Cleanup (page छोड़ने पर)
+  const cleanup = () => clearInterval(timerInterval);
+  window.addEventListener('beforeunload', cleanup, { once: true });
+  // box हटने पर भी रोक दो
+  const observer = new MutationObserver(() => {
+    if (!document.body.contains(box)) {
+      clearInterval(timerInterval);
+      observer.disconnect();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
 }
 
 function startPolling(box, id) {
@@ -200,18 +214,28 @@ function startPolling(box, id) {
         otpArea.classList.remove('rotating');
         clearInterval(poll);
 
-        const item = activeNumbers.find(i => i.id === id);
-        if (item) {
-          item.otp = code;
+        const itemIndex = activeNumbers.findIndex(i => i.id === id);
+        if (itemIndex !== -1) {
+          activeNumbers[itemIndex].otp = code;
           saveActive();
         }
       }
     } catch {
-      // silent fail
+      // silent
     }
   }, 1800);
 
-  window.addEventListener('beforeunload', () => clearInterval(poll));
+  // Cleanup
+  const cleanup = () => clearInterval(poll);
+  window.addEventListener('beforeunload', cleanup, { once: true });
+
+  const observer = new MutationObserver(() => {
+    if (!document.body.contains(box)) {
+      clearInterval(poll);
+      observer.disconnect();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
 }
 
 async function fetchNumber() {
