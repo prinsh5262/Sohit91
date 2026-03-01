@@ -1,26 +1,49 @@
-// हर instance के लिए unique ID बनाओ (पेज लोड होने पर एक बार)
-const INSTANCE_ID = 'inst_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+// ------------------ Instance अलग करने के लिए नाम लो ------------------
+let INSTANCE_NAME = localStorage.getItem('hp_instance_name');
 
-// अब keys को instance-specific बनाओ
-const getKey = (base) => `${base}_${INSTANCE_ID}`;
+if (!INSTANCE_NAME) {
+  let nameInput = prompt(
+    "इस टैब/इंस्टेंस का नाम डालो (उदाहरण: tab1, phoneA, mypanel2, insta1 आदि)\n" +
+    "अलग-अलग टैब में अलग नाम डालना जरूरी है वरना conflict होगा!\n" +
+    "(खाली छोड़ने पर रैंडम नाम बन जाएगा)",
+    ""
+  );
 
-const STATE_KEY   = getKey('hp_isOn');
-const USED_KEY    = getKey('hp_used_numbers');
-const ACTIVE_KEY  = getKey('hp_active_numbers');
+  if (!nameInput || nameInput.trim() === "") {
+    nameInput = "default_" + Math.random().toString(36).substring(2, 9);
+  } else {
+    nameInput = nameInput.trim().replace(/[^a-zA-Z0-9_-]/g, '_'); // safe characters
+  }
 
-const API_KEY  = "9f67f5ed7e8eef95214e93e2da6b3465";
-const BASE_URL = "https://api.grizzlysms.com/stubs/handler_api.php";
-const SERVICE  = "swr";
-const COUNTRY  = "22";
-const MAX_PRICE = "80";
+  INSTANCE_NAME = nameInput;
+  localStorage.setItem('hp_instance_name', INSTANCE_NAME);
+  alert("इस इंस्टेंस का नाम सेट हो गया: " + INSTANCE_NAME + "\nअब अलग टैब में दूसरा नाम डालकर चलाओ");
+}
+
+// keys को instance-specific बनाओ
+const getKey = (base) => `hp_${base}_${INSTANCE_NAME}`;
+
+const STATE_KEY   = getKey('isOn');
+const USED_KEY    = getKey('used_numbers');
+const ACTIVE_KEY  = getKey('active_numbers');
+
+// ----------------------------------------------------
+
+const API_KEY    = "9f67f5ed7e8eef95214e93e2da6b3465";
+const BASE_URL   = "https://api.grizzlysms.com/stubs/handler_api.php";
+const SERVICE    = "swr";
+const COUNTRY    = "22";
+const MAX_PRICE  = "80";
 
 let isOn = localStorage.getItem(STATE_KEY) === 'true';
 let usedNumbers = JSON.parse(localStorage.getItem(USED_KEY) || '[]');
 let activeNumbers = JSON.parse(localStorage.getItem(ACTIVE_KEY) || '[]');
 
-const toggleBtn  = document.getElementById('toggleBtn');
-const statusDiv  = document.getElementById('status');
-const numbersDiv = document.getElementById('numbers');
+const toggleBtn   = document.getElementById('toggleBtn');
+const statusDiv   = document.getElementById('status');
+const numbersDiv  = document.getElementById('numbers');
+
+let interval = null;
 
 function updateUI() {
   toggleBtn.textContent = isOn ? 'OFF Karo' : 'ON Karo';
@@ -30,10 +53,10 @@ function updateUI() {
 
 toggleBtn.onclick = () => {
   isOn = !isOn;
-  localStorage.setItem(STATE_KEY, isOn);
+  localStorage.setItem(STATE_KEY, isOn ? 'true' : 'false');
   updateUI();
-  if (isOn) start();
-  else clearInterval(interval);
+  if (isOn) startFetching();
+  else stopFetching();
 };
 
 function saveActive() {
@@ -45,7 +68,7 @@ function isValid(phone) {
   if (!phone.startsWith("91")) return false;
   if (!/^\d{12}$/.test(phone)) return false;
   if (usedNumbers.includes(phone)) return false;
-  
+
   usedNumbers.push(phone);
   localStorage.setItem(USED_KEY, JSON.stringify(usedNumbers));
   return true;
@@ -56,7 +79,7 @@ function cleanStorage() {
   activeNumbers = activeNumbers.filter(item =>
     item.phone && item.phone.length === 12 &&
     item.phone.startsWith("91") &&
-    (now - item.startTime) < 300000  // 5 min
+    (now - item.startTime) < 300000
   );
   saveActive();
 }
@@ -64,9 +87,9 @@ function cleanStorage() {
 function renderSaved() {
   cleanStorage();
   numbersDiv.innerHTML = '';
-  
+
   activeNumbers
-    .sort((a,b) => b.startTime - a.startTime)
+    .sort((a, b) => b.startTime - a.startTime)
     .forEach(item => {
       const box = createNumberBox(item.phone.slice(2), item.id, item.startTime, item.otp);
       numbersDiv.appendChild(box);
@@ -85,7 +108,7 @@ function createNumberBox(num10, id, startTime, otp = null) {
   box.className = 'numbox';
   box.dataset.id = id;
 
-  const clickedKey = `copy_${id}_${INSTANCE_ID}`;
+  const clickedKey = `copy_${id}_${INSTANCE_NAME}`;
   const clickedClass = localStorage.getItem(clickedKey) === 'once' ? 'clicked-once' : '';
 
   box.innerHTML = `
@@ -108,7 +131,7 @@ function createNumberBox(num10, id, startTime, otp = null) {
   const copyNumBtn = box.querySelector('.copy-number-btn');
 
   const copyNumberAction = () => {
-    navigator.clipboard.writeText(num10);
+    navigator.clipboard.writeText(num10).catch(() => {});
     flashBoxRed(box);
 
     if (copyNumBtn.classList.contains('clicked-once')) {
@@ -126,10 +149,10 @@ function createNumberBox(num10, id, startTime, otp = null) {
   const copyOtpBtn = box.querySelector('.copy-otp-btn');
   copyOtpBtn.onclick = () => {
     const otpText = box.querySelector('.otp').textContent.trim();
-    if (otpText !== 'Waiting for OTP...' && otpText !== 'OTP wait...') {
-      navigator.clipboard.writeText(otpText);
+    if (otpText && !otpText.includes('Waiting') && !otpText.includes('wait')) {
+      navigator.clipboard.writeText(otpText).catch(() => {});
       copyOtpBtn.textContent = "Copied!";
-      setTimeout(() => { copyOtpBtn.textContent = "Copy OTP"; }, 1800);
+      setTimeout(() => copyOtpBtn.textContent = "Copy OTP", 1800);
     }
   };
 
@@ -138,15 +161,16 @@ function createNumberBox(num10, id, startTime, otp = null) {
 
 function startTimer(box, startTime) {
   let remaining = 300 - Math.floor((Date.now() - startTime) / 1000);
+  if (remaining < 0) remaining = 0;
+
   const timer = box.querySelector('.timer');
-  
   const int = setInterval(() => {
     remaining--;
     if (remaining < 0) remaining = 0;
-    const m = String(Math.floor(remaining/60)).padStart(2,'0');
-    const s = String(remaining % 60).padStart(2,'0');
+    const m = String(Math.floor(remaining / 60)).padStart(2, '0');
+    const s = String(remaining % 60).padStart(2, '0');
     timer.textContent = `${m}:${s}`;
-    
+
     if (remaining <= 0) {
       clearInterval(int);
       box.remove();
@@ -154,6 +178,9 @@ function startTimer(box, startTime) {
       saveActive();
     }
   }, 980);
+
+  // cleanup on page unload (optional but good)
+  window.addEventListener('beforeunload', () => clearInterval(int));
 }
 
 function startPolling(box, id) {
@@ -161,36 +188,36 @@ function startPolling(box, id) {
   const otpArea = box.querySelector('.otp-area');
 
   const poll = setInterval(async () => {
-    const q = new URLSearchParams({ api_key: API_KEY, action: 'getStatus', id });
+    const params = new URLSearchParams({ api_key: API_KEY, action: 'getStatus', id });
     try {
-      const r = await fetch(BASE_URL + '?' + q);
-      const t = (await r.text()).trim();
-      
-      if (t.startsWith('STATUS_OK')) {
-        const code = t.split(':')[1];
+      const res = await fetch(BASE_URL + '?' + params);
+      const text = (await res.text()).trim();
+
+      if (text.startsWith('STATUS_OK')) {
+        const code = text.split(':')[1];
         otpEl.textContent = code;
         otpEl.classList.add('success');
         otpArea.classList.remove('rotating');
         clearInterval(poll);
-        
+
         const item = activeNumbers.find(i => i.id === id);
         if (item) {
           item.otp = code;
           saveActive();
         }
       }
-    } catch (err) {
+    } catch {
       // silent fail
     }
   }, 1800);
-}
 
-let interval = null;
+  window.addEventListener('beforeunload', () => clearInterval(poll));
+}
 
 async function fetchNumber() {
   if (!isOn) return;
-  
-  const p = new URLSearchParams({
+
+  const params = new URLSearchParams({
     api_key: API_KEY,
     action: 'getNumber',
     service: SERVICE,
@@ -199,11 +226,11 @@ async function fetchNumber() {
   });
 
   try {
-    const res = await fetch(BASE_URL + '?' + p);
-    const txt = (await res.text()).trim();
-    
-    if (txt.startsWith('ACCESS_NUMBER')) {
-      const [_, id, full] = txt.split(':');
+    const res = await fetch(BASE_URL + '?' + params);
+    const text = (await res.text()).trim();
+
+    if (text.startsWith('ACCESS_NUMBER')) {
+      const [, id, full] = text.split(':');
       if (!isValid(full)) return;
 
       const startTime = Date.now();
@@ -217,24 +244,24 @@ async function fetchNumber() {
       startTimer(box, startTime);
       startPolling(box, id);
     }
-  } catch (err) {
+  } catch {
     // silent
   }
 }
 
-function start() {
+function startFetching() {
   fetchNumber();
   interval = setInterval(fetchNumber, 1200);
 }
 
-function stop() {
+function stopFetching() {
   if (interval) {
     clearInterval(interval);
     interval = null;
   }
 }
 
-// Initialization
+// Initialize
 updateUI();
 renderSaved();
-if (isOn) start();
+if (isOn) startFetching();
